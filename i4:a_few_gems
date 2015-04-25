@@ -1,0 +1,194 @@
+===== I4: A Few Gems =====
+
+1. Using the Gemfile to setup a RubyGem
+  - Gemfile
+     gem 'paperclip'
+
+  - Terminal
+    $ brew install imagemagick
+    $ rails server
+    $ bundle
+
+    $ bin/rails generate migration add_paperclip_fields_to_article
+
+    # this will create a file in your db/migrate/ folder that ends in _add_paperclip_fields_to_article.rb
+
+  - _add_paperclip_fields_to_article.rb
+
+    class AddPaperclipFieldsToArticle < ActiveRecord::Migration
+      def change
+        add_column :articles, :image_file_name,     :string
+        add_column :articles, :image_content_type,  :string
+        add_column :articles, :image_file_size,     :integer
+        add_column :articles, :image_updated_at,    :datetime
+      end
+    end
+
+  - Terminal
+    $ rake db:migrate
+
+2. Adding to the Model
+  - app/models/article.rb     # below the existing has_many lines add these lines
+
+    has_attached_file   :image
+    validates_attachment_content_type   :image, :content_type => ["image/jpg", "image/jpeg", "image/png"]
+
+  # This has_attached_file method is part of the paperclip library.
+    With that declaration, paperclip will udnerstand that this model should accept a file attachment and
+    that there are field to store information about that file which start with image_ in this model's database table.
+
+  # All attachments are required to include a content_type validation, a file_name validation, or to explicitly state
+    that they're not going to have either. Paperclip raises MissingRequiredValidation error if you do not do this.
+    So, we add the validates_attachment_content_type line so that our model will validate that it is receiving a proper filetype.
+
+  - app/helpers/articles_helper.rb      # update the article_params method to permit an :image
+
+      def article_params
+        params.require(:article).permit(:title, :body, :tag_list, :image)
+      end
+
+3. Modifying the Form Template
+  - app/views/articles/_form.html.erb
+
+    <%= form_for(@article, html: {multipart: true}) do |f| %>   # change the top line to this
+
+    <p>               # put in this bit of code right before the paragraph with the save button
+      <%= f.label :image, "Attach an Image" %><br />
+      <%= f.file_field :image %>
+    </p>
+
+4. Trying it out
+  - Terminal
+    $ rails server
+  - web browser
+    http://localhost:3000/articles
+    # click EDIT for your first article; click the choose a file; select a small image file
+    # click SAVE and you'll return to the article index; click the title of the article you just modified;
+    # you should see the image attached to the article
+
+    # to check if it worked
+    # open a console (rails console) from the terminal; find the ID number of the article by looking at the URL
+    # in the console, enter a = Article.find(1); the article should have data in the image_file_name and other fields
+    # enter a.image to see even more data about the file
+
+  - app/views/articles/show.html.erb
+
+    <p><%= image_tag @article.image.url %></p>
+
+5. Improving the Form
+  # When first working with the edit form I wasn't sure the upload was working because I expected the file_field to display the name of the file that I had already uploaded. Go
+    back to the edit screen in your browser for the article yo've been working with. See how it just says "Choose File, noe file selected" - nothing tells the user that
+    a file already exists for this article. Let's add that information in now.
+
+  - app/views/articles/_form.html.erb
+
+    # we'll add in some new logic that works like this:
+    # if the article has an image filename *Display the image
+    # then display the file_field button with the label "attach a new image"
+
+    <p>
+      <%= if @article.image.exists? %>
+        <%= image_tag @article.image.url %><br />
+      <% end %>
+      <%= f.label :image, "Attach a New Image" %><br />
+      <%= f.file_filed :image %>
+    </p>
+
+    # check to see how that looks both for articles that already have an image and ones that don't
+      when you "show" an article that doesn't have an image attached it'll have an ugly broken link
+      Go into your app/views/articles/show.html.erb and add a condition like we did in the so the
+      image is only displayed if it actually exists
+
+6. Further Notes about Paperclip
+
+  # Yes, a model could have many attachments instead of just one. To accomplish this you'd create a new model, let's
+    call it "Attachment", where each instance of the model can have one file using the same fields we put into Aricle above
+    as well as an article_id field. The Attachment would the belong_to an aritcle, and an article would have_many attachments
+
+  # Paperclip supports automatic image resizing and it's easy. In the model add:
+
+    has_attached_file :image, styles: { medium: "300x300>", thumb: "100x100>" }
+
+  # this would automatically create a medium size where the largest dimension is 300 pixels and a thumb size where the largest dimension
+    is 100 pixels. Then in your view, to display a specific version, you jsut pass in an extra parameter like this:
+
+    <%= image_tag @article.image.url(:medium) %>
+
+  # the catch is paperclip doesn't do the image manipulation itself, it relies on a package called imagemagick. Imageprocesssing libraries are difficult to install
+
+    $ brew install imagemagick
+
+  # Note: when the image is uploaded - Paperclip will use Imagemagick to create the customized sizes specified on the
+          the has_attached_file line. This also means that if you change your sizes at a later time,
+          images that had been previously uploaded won't have versions at those new sizes.
+
+7. A Few Sass Examples
+
+  # we're not focusing on CSS development, so here are a few styles that you can copy past and modify.
+
+  - app/assets/stylesheets/styles.css.scss
+
+    $ primary_color: #AAA;
+
+      body {
+        background-color: $primary_color;
+        font: {
+          family: Verdana, Helvetica, Arial;
+          size: 14px;
+        }
+      }
+
+      a {
+        color: #0000FF;
+        img {
+          border: none;
+        }
+      }
+
+      .clear {
+        clear: both;
+        height: 0;
+        overflow: hidden;
+      }
+
+      #container {
+        width: 75%;
+        margin: 0 auto;
+        background: #fff;
+        padding: 20px 40px;
+        border: solid 1px black;
+        margin-top: 20px;
+      }
+
+      #content {
+        clear: both;
+        padding-top: 20px;
+      }
+
+8. Working with Layougs
+  # a layout is a special view template that wraps other views. Rails has already give us one
+
+  - app/views/layouts/application.html.erb
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Blogger</title>
+      <%= stylesheet_link_tag    "application", media: "all", "data-turbolinks-track" => true %>
+      <%= javascript_include_tag "application", "data-turbolinks-track" => true %>
+      <%= csrf_meta_tags %>
+    </head>
+    <body>
+
+    <p class="flash">
+      <%= flash.notice %>
+    </p>
+    <%= yield %>
+
+    </body>
+    </html>
+
+  - app/assets/stylesheets/application.css
+
+  # the require_tree line automatically loads all of the stylesheets in the current directory,
+    and includes them in application.css. This feature is called the asset pipeline. It's new and very powerful!

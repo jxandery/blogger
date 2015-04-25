@@ -1,0 +1,202 @@
+===== I0: Up and Running: =====
+
+1. Start a new project:
+  - Terminal:
+    $ rails new project_name  # create a new project
+    $ bin/rails server        # starts the server
+
+  - Web browser:browser
+    http://localhose:3000     # to see what is getting sent back from the server
+
+  - Terminal:
+    $ bin/rails generate model model_name   # generates the needed view model files and database
+
+      # the following files get created
+      # db/migrate/(some_time_stamp)_create_(model_name-plural.rb)    # a database migration to create the articles table
+      # app/models/(model_mame-singluar).rb                           # the file that will hold the model code
+      # test/models/(model_mame-singluar)_test.rb                     # a file to hold unit test for Article
+      # test/fixtures/articles.yml                                    # a fixtures file to assist with unit testing
+
+# With these files in place you can start developing
+
+2. Create columns in the table:
+  - db/migrate/(some_time_stamp)_create_(model_name-plural).rb:
+
+      def change
+        create_table :articles do |t|
+          t.string :title
+          t.text   :body
+
+          t.timestamps                # creates the columns created_at and updated_at
+        end
+      end
+
+3. Run the migration:
+  - Terminal:
+    $ bin/rake db:migrate             # rake starts the rake program; which is a ruby utility for running maintenance like functions on your app (working w/ DB, executing unit tests and deploying to a server)
+                                      # db:migrate means look into your set of function for the db, run migrate. The migrate action finds all migrations in db/migrate/folder looks at a special table in the DB and runs any migrations that haven't been run
+
+# We've now created the Articles table in the database and can start working on our Article model
+
+4. Open up the console:
+  - Terminal:
+    $ bin/rails console               # the console allows you to access and work with any part of your application, in particular the table and the objects pulled from it
+
+  - app/models/article.rb:            # open this and you'll see that it's not very impressive. There are no attributes
+
+    # reflection: Rails queries a database, looks at the articles table and assumes that whatever columns that table has should be the attributes for the model
+    # id columns are automatically generated and serve as the primary key
+    ** articles created with the Article.new command does not change values in the databse until the Article.save method is called on the object
+
+# Now we need a web interface inorder for this project to be a web application.
+
+5. Setup the Router:
+  # The router decides what the client/web browser request is trying to do, what resources it's trying to interact with
+  # The router dissects a request based on the address it is requesting and other HTTP parameters (e.g., request type: GET, PUT, etc)
+
+  - config/routes.rb:
+    + add resources :articles
+
+    Blogger::Application.routes.draw do
+      resources :articles                 # This line tells Rails that we have a resource named articles and the router should expect requests to follow the RESTful model of web interaction (REpresentational State Transfer).
+    end
+
+    # http://localhost:3000/articles/     : the router understands that you are looking for a listing of the articles
+    # http://localhost:3000/articles/new  : the router understands that you are trying to create a new article
+
+  - Terminal:
+    $ bin/rake routes                     # lists the routes in your application
+
+    Prefix        Verb    URI Pattern                    Controller#Action
+    articles      GET     /articles(.:format)            articles#index
+                  POST    /articles(.:format)            articles#create
+    new_article   GET     /articles/new(.:format)        articles#new
+    edit_article  GET     /articles/:id/edit(.:format)   articles#edit
+    article       GET     /articles/:id(.:format)        articles#show
+                  PATCH   /articles/:id(.:format)        articles#update
+                  PUT     /articles/:id(.:format)        articles#update
+                  DELETE  /articles/:id(.:format)        articles#destroy
+
+**where does article_path come from? How is it generated? The explanation below is not very clear
+
+  Prefix
+    # The router provides two methods using the name, articles_path and articles_url
+    # articles_path uses a relative path; this is the preferred version
+    # articles_url uses the full URL protocol, server, and path
+  Verb
+    # GET is the HTTP verb for the route
+  URI Pattern
+    # Similar to a regex, this column is matched against the requested URL
+    # elements in parentheses are optional
+    # markers starting with a : will be made available to the controller with that name
+    # /articles(.:format) will match with URLs /articles/, /articles.json, /articles and other similar forms
+  Controller#Action
+    # this column is where the route maps to in the application.
+    # for example, articles#index, requests will be sent to the index method of the ArticlesController class
+
+6. Create the Articles Controller
+  - Terminal:
+    $ bin/rails generate controller articles
+
+      # the following files get generated for you
+      # app/controllers/articles_controller.rb         : controller file itself
+      # app/views/articles                             : directory to contain the controller's view templates
+      # test/controllers/articles_controller_test.rb   : controller's unit tests file
+      # app/helpers/articles_helper.rb                 : helper file to assist with the views
+      # test/helpers/articles_helper_test.rb           : helper's unit test file
+      # app/assets/javascripts/articles.js.coffee      : CoffeeScript file for this controller
+      # app/assets/stylesheets/articles.css.scss       : a SCSS stylesheet for this controller
+
+7. Defining the Index Action
+  - app/controllers/application_controller.rb
+
+    def index
+      @articles = Article.all
+    end
+
+8. Creating the Template
+  - app/views/articles/index.html.erb
+
+    <h1>all articles</h1>
+    <ul id="articles">
+      <% @articles.each do |article| %>
+        <li>
+        <%= article.title %>
+        </li>
+      <% end %>
+    </ul>
+
+    # Rails has assumed that our index action inthe controller should have a corresponding index.erb view in the views folder.
+    # putting the HTML in the name makes it clear that this view is for generating HTML.
+    # ERB - embedded Ruby is a templating language that allows us to mix Ruby into our HTML
+
+9. Adding Navigation to the Index
+
+** Remember when we looked at the Routing Table using bin/rake routes from the command line? Look at the left
+   most column and you'll see the rout names. These are useful when creating the links. When we create a link, we'll typically use a
+   "route helper" to specify where the link should point. We want our link to display the single article which happens in the show action.
+   Looking at the table, the name for that route is article and it requires a parameter id in the uRL. The route helper we'll use looks like
+
+    article_path(id)
+
+   For example, article_path(1) would generate the string "/articles/1".
+
+  - app/views/articles/index.html.erb
+
+    change: <%= article.title %>
+        to: <%= link_to article.title, article_path(article) %>   #first part is the text of the link, the next part is the route helper
+    ouputs: <a href="/articles/1">First Sample Articel</a>
+
+10. Pointing to a Stylesheet
+  - app/views/articles/index.html.erb
+
+    # To add HTML attributes to a link, we include them in a Ruby hash style on the end like :
+
+    <%= link_to article.title, article_path(article), class: 'article_title' %>
+
+    # to add a CSS ID attribute
+
+    <%= link_to article.title, article_path(article), class: 'article_title', id: "article_#{article.id}" %>
+
+    # the file should look like:
+
+          <h1>All Articles</h1>
+
+          <ul id="articles">
+            <% @articles.each do |article| %>
+              <li>
+                <%= link_to article.title, article_path(article) %>
+              </li>
+            <% end %>
+          </ul>
+
+          <%= link_to "Create a New Article", new_article_path, class: "new_article" %>
+
+11. Creating the SHOW Action
+  - app/controllers/articles_controller.rb
+
+    def show
+    end
+
+** Look at the URL: http://localhost:3000/articles/1. When we added the link_to in the index and pointed it to the article_path for this article,
+   the router created this URL. Following the RESTful convention, this URL goes to a show method which should display the article w/ id number 1.
+
+    # So what do we want to do when the user clicks an article title? Find the article, this display a page with its title and body. We'll use the
+      number on the end of the URL to find the article in the database.
+    # Within the controller, we have access to a method named parmas which returns us a hash of the request parameters. Often we'll refer to it as
+      "the params hash", but technically it's the params method which returns a hash".
+    # Within that has we can find the :id from the URL by accessing the key params[:id].
+    # Use this inside the show method of ArticlesController along with the class method find on the Article class:
+
+  - app/controllers/articles_controller.rb
+
+    def show
+      @article = Article.find(params[:id])
+    end
+
+  - app/views/articles/show.html.erb
+
+    <h1><%= @article.title %></h1>
+    <p><%= @article.body %></p>
+    <%= link_to "<< Back to Articles List", articles_path %>
+

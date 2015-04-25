@@ -1,0 +1,174 @@
+===== I2: Adding Comments =====
+  # Most blogs allow readers to interact with the content by posting comments.
+
+1. Designing the Comment Model:
+  # What is a comment? -> It's attached to an article, has an author and has a body
+
+  - Terminal
+    $ bin/rails generate model Comment author_name:string body:text article:references
+
+2. Setting up the Migration
+  - db/migrate/some-timestamp_create_comments.rb
+    # the fields below were added:
+
+    t.string      :author_name
+    t.text        :body
+    t.references  :article
+
+    $ bin/rake db:migrate
+
+3. Relationships:
+**The power of SQL databases is the ability to express relationships between elements of data. We can joing together the informaiton about an order with the information about a customer. Or in
+  our case here, join together an article in the articles table with its comments in the commetns table. We do this by using foreign keys.
+
+  Foreign keys are a way of marking one-to-one and one-to-many relationships. An article might have zero, five, or one hundred comments. But a comment only belongs to one article. These
+  objexts have a one-to-many relationships - one article connects ot many comments
+
+  Part of the big deal with Rails is that it makes working with these relationships very easy. When we created the migration for comments we started with a references field named article.
+  The rails convention for a one-to-many relationship:
+    - the objects on the "many" end should have a foreign key referencing the "one" object.
+    - that foreign key should be titled with the name of the "one"object, then an underscore, then "id"
+    - In this case one article has many comments, so each comment has a field named article_id
+
+  - app/models/comment.rb
+
+    class Comment < ActiveRecord::Base
+      belongs_to :article
+    end
+
+  - app/models/article.rb
+
+    class Article <ActiveRecord::Base
+      has_many :comments
+    end
+
+4. Testing in the Console
+  - Terminal:
+    - rails console   # to open a start the console
+    - reload!         # to refresh any code changes
+
+    > a = Article.first
+    > a.comments            # returns a blank array because that article doesn't have any comments
+    > Comment.new           # returns a blank Comment object with those fields we defined in the migration (author_name, body, article)
+    > a.comments.new        # returns Comment object with article_id field filled in with the ID number of the article a
+    > a.comments            # shows that the new comment object has already been added to the in-memory collection for the a article object
+
+    # create a few comments for that article:
+
+    > c = a.comments.new
+    > c.author_name = "Daffy Duck"
+    > c.body = "I think this article is thhh-thhh-thupid!"
+    > c.save
+    > d = a.comments.create(author_name: "Chewbacca", body: "RAWR!")
+
+    # the create method was used above, because .new doesn't send the data to the database until you call save.
+    # With create you build and save to the database all in one step
+
+    > a.reload        # the console tries to minimize the number of times it talks to the database, so sometimes it retrieves the information from the cache instead of really asking the database
+    > a.comments      # reload forces the console to clear the cache and look up the accurate information
+
+5. Displaying Comments for an Article
+  - app/views/articles/show.html.erb
+
+    <h3>Comments</h3>     # these lines are added right before the link to the articles list
+    <%= render partial: 'articles/comment', collection: @article.comments %>
+
+    # this renders a partial named "comment" and that we want to do it once for each element in the collection @article.comments. The .comments method on an article returns an array of its associated comment objects
+    # This render will pass each element of that array one at a time into the partial named "comment".
+
+  - app/views/articles/_comment.html.erb      # add the code below
+
+    <div>
+      <h4>Comment by <%= comment.author_name %></h4>
+      <p class="comment"><%= comment.body %></p>
+    </div>
+
+6. Web-Based Comment Creation
+  # Good start, but our users can't get into the console to create their comments. We'll need to create a web interface.
+
+  - show.html.erb
+
+    <%= render parital: 'comments/form' %>
+
+  - app/views/comments/_form.html.erb
+
+    <h3>Post a Comment</h3>
+    <p>(Comment form will go here)</p>
+
+** First look in your articles_controller.rb for the new method. Remember how we created a blank Article object so Rails could figure
+    out which fields an article has? We need to do the same thing before we create a form for the Comment.
+
+   But when we view the article and display the comment form we're not running the article's new method, we're running the show method. So we'll need to create a blank Comment object inside the show method:
+
+    @comment = Comment.new
+    @comment.article_id = @article.id
+
+**Due to the Rails' mass assignment protection, the article_id attribute of the new Comment object needs to be manually assigned with the id of the Article.
+  Why do we use Comment.new instead of @article.comments.new?
+
+  - comments/_form.html.erb
+
+    <h3>Post a Comment</h3>
+
+    <%= form_for [@article, @comment] do |f| %>
+      <p>
+        <%= f.label :author_name %><br/>
+        <%= f.text_field :author_name %>
+      </p>
+      <p>
+        <%= f.label :body %><br/>
+        <%= f.text_area :body %>
+      </p>
+      <p>
+        <%= f.submit 'Submit' %>
+      </p>
+    <% end %>
+
+  - config/routes.rb
+    # update your article to specify comments as a sub-resource
+
+    resources: articles do
+      resources :comments
+    end
+
+**Did you figure out why we aren't using @article.comments.new? If you want, edit the show action and replace @comment = Comment.new with @comment = @article.comments.new. Refresh the browser. What do you see?
+  There is an extra empty comment at the end of the list of comments. This is because the @article.comments.new has added the new Comment to the in-menory collection for the Article. Don't forget to change it back.
+
+  - Terminal
+    $ bin/rails generate controller comments
+
+  - comments_controller.rb
+
+    def create
+      @comment = Comment.new(comment_params)
+      @comment.article_id = params[:article_id]
+
+      @comment.save
+
+      redirect_to article_path(@comment.article)
+    end
+
+    def comment_params
+      params.require(:comment).permit(:author_name, :body)
+    end
+
+  # As a user, imagine you write a witty comment, click save, then what would you expect? Probably to see the article page, maybe automatically scrolling down to your comment.
+  # Recall that article_path needs to know which article we want to see. We might not have an @article object in this controller action, but we can find the Article associate with
+    this comment by calling @comment.article.
+
+7. Cleaning up
+  - show.html.erb
+
+    <h3>Comments (<%= @article.comments.size %>)</h3>
+
+    # Change the comments form from "Author Name" to "Your Name"
+  - comments/_form.html.erb
+
+    <%= f.label :author_name, "Your Name" %>
+
+  - _comment.html.erb (partial)
+    # add something about when the comment was posted.
+    # Rails has a really neat helper named distance_of_time_in_words which takes two dates and creates a text description of the difference like "32 minutes later", "3 months later", so on
+
+    <p>Posted <%= distance_of_time_in_words(comment.article.created_at, comment.created_at) %> later</p>
+

@@ -1,0 +1,270 @@
+===== I3: Tagging =====
+  In this iteration we'll add the ability to tag articles for organization and navigation.
+
+Understanding the Relationship
+------------------------------
+  - What is a tag? We need to figure that out before we can create the model.
+  - First, a tag must have a relationship to an article so they can be connected. A single tag, like "ruby" for instance, should be able to relate to many articles.
+  - On the other side of the relationship, the article might have multiple tags (like "ruby", "rails", and "programming" as above) - so it's also a many relationship.
+  - Articles and tags have a many-to-many relationship
+
+  - Relationship setup
+    - an article has_many taggings
+    - a tag has_many taggings
+    - a tagging belongs_to an article and belongs_to a tag
+
+Making Models
+-------------
+  - With those relationships in mind, let's design the new models:
+  - Tag:
+    name: A string
+  - Tagging:
+    tag_id: integer holding the foreign key of the referenced tag
+    article_id: Integer holding the foreign key of the referenced article
+  # Note that there are no changes necessary to article because the foreign key is stored in the tagging model
+
+  - Terminal
+    $ bin/rails generate model Tag name:string
+    $ bin/rails generate model Tagging tag:references article:references
+
+**what's the api doing here? what is references?
+
+Expressing Relationships
+------------------------
+  # Now that our model files are generated we need to tell Rails about the relationships between them. For each of the files below, add these lines:
+  - app/models/article.rb
+
+    has_many :taggings
+    has_many :tags, through: :taggings
+
+  - app/models/tag.rb
+
+    has_many :taggings
+    has_many :articles, through: :taggings
+
+  # now we can from article objects, we can ask for article.tags
+  # tag and conversely now we have an object named tag, we can ask for tag.articles
+
+    > a = Article.first
+    > a.tags.create name: "tag1"
+    > a.tags.create name: "tag2"
+    > a.tags
+    => [#<Tag id: 1, name: "tag1", created_at: "2012-11-28 20:17:55", updated_at 2012-11-28 20:17:55">, #<Tag id: 2, name: "tag2", created_at: "2012-11-28 20:31:49", updated_at: "2012-11-28 20:31:49">]
+
+An Interface for Tagging Articles
+---------------------------------
+  # The first interface we're interested in is within the article iteself.
+  # When I write an article, I want to have a text box where I can enter a list of zero or more tags seperated by commas.
+  # When I save the article, my app should associate my article with the tags with those names, creating them if necessary.
+
+  - app/views/articles/_form.html.erb
+
+    <p>
+      <%= f.label :tab_list %><br />
+      <%= f.text_field :tab_list %>
+    </p>
+
+**From now until the next set of ** it gets complicated and requires separate attention
+  - article.rb  # add a tag_list method in order for the form to display related tags
+
+    def tag_list
+      tags.join(", ")
+    end
+
+  - Terminal.rb     # now checkout tag_list
+
+    > reload!
+    > a = Article.first
+    > a.tag_list
+      => "#<Tag:0x007fe4d60c2430>, #<Tag:0x007fe4d617da50>"
+
+  # this is not quite right. what happened?
+  # our array of tags is an array of tag instances. when we joing the array Ruby called the default #to_s method on every one of these tag instances. the default
+  # #to_s method for an object produces some really ugly output. we could fix the tag_list method by:
+    - converting all our tag objects to an array of tag names
+    - joining the array of tag names together
+
+    def tag_list
+      self.tags.collect do |tag|
+        tag.name
+      end.join(", ")
+    end
+
+  # another alternative is to define a new Tag#to_s method which overrides the default:
+
+    class Tag < Active Record::Base
+
+      has_many :taggings
+      has_many :articles, through: :taggings
+
+      def to_s
+        name
+      end
+    end
+
+  # now, when we try to joing our tags, it'll delegate properly to ur name attribute. this is because #join calls #to_s on every element of the array
+  # your form should now show up and there's a text box at the bottom named "Tag list". Enter content for another sample article and in the tag list enter 'ruby, technology'. Click save
+  # it didn't work! click edit again and you'll see that it's returning the tag objects. what gives?
+
+      Started PATCH "/articles/1" for 127.0.0.1 at 2013-07-17 09:25:20 -0400
+      Processing by ArticlesController#update as HTML
+        Parameters: {"utf8"=>"", "authenticity_token"=>"qs2M71Rmb64B7IM1ASULjlI1WL6nWYjgH/eOu8en+Dk=", "article"=>{"title"=>"Sample Article", "body"=>"This is the text for my article, woo hoo!", "tag_list"=>"ruby, technology"}, "commit"=>"Update Article", "id"=>"1"}
+        Article Load (0.1ms)  SELECT "articles".* FROM "articles" WHERE "articles"."id" = ? LIMIT 1  [["id", "1"]]
+      Unpermitted parameters: tag_list
+
+  # Unpermitted parameters? oh yeah! Strong parameters has done its job, saving us from parameters we don't want. But inthis case, we do want that parameter. Open up your
+  - app/helpers/articles_helper.rb
+
+    def article_params
+      params.require(:article).permit(:title, :body, :tag_list)
+    end
+
+  # if you go back and put "ruby, technology" as tags, and click save, you'll get this error:
+
+      ActiveRecord::UnknownAttributeError in ArticlesController#create
+      unknown attribute: tag_list
+
+  # what's this all about? Let's start by looking at the form data that was posted when we clicked SAVE. This data is in the terminal where you are running the rails server.
+  # look for the lint that starts "Processing ArticlesController#create"
+
+      Processing ArticlesController#create (for 127.0.0.1) [POST]
+        Parameters: {"article"=>{"body"=>"Yes, the samples continue!", "title"=>"My Sample", "tag_list"=>"ruby, technology"}, "commit"=>"Save", "authenticity_token"=>"xxi0A3tZtoCUDeoTASi6Xx39wpnHt1QW/6Z1jxCMOm8="}
+
+  # the field that interest here is the "tag_list"=>"technology, ruby". those are the tags as i typed them into the form.
+  # the error came up in the create method, so let's peek at app/controllers/articles_controller.rb in the create method. See the first line that calls Article.new(article_params)?
+  # this is the line that's causing the error as you could see in the middle of the stack trace
+  # since the create method passes all the parameters from the form into the Article.new method, the tags are sent in as the string "technology, rugy". The new method will try to
+    set the new Article's tag_list equal to "technology, ruby" but that method doesn't exit because there is no attribute named tag_list.
+  # there are serveral way sto solve this proble, but the simplest is to pretend like we have an attribute named tag_list.
+  # we can define the tag_list= method inside article.rb like this (DO NOT DELETE YOUR ORIGINAL TAG_LIST METHOD)
+
+  - article.rb
+
+    def tag_list=(tags_string)
+    end
+
+Not so Fast
+-----------
+  - Did it really work? It's hard to tell. Let's jump into the console and have a look.
+  - Terminal:
+
+    > a Article.last
+    > a.tags
+
+  # i bet the console repreted that a had [] tags - an empty list. (it also probably said something about an ActiveRecord::Associations::ColletionProxy)
+    So we didn't generate an error, but we didnt create any tags either
+  # we need to return to the Article#tag_list= method in article.rb and do some work
+  # the Article#tag_list= method accepts a parameter, a string like "tag1, tag2, tag3" and we need to associate the article with tags that have those same names.
+  - article.rb
+
+    - split the tags_string into an array of strings with leading and trainling whitespaces removed
+      "tag1, tag2, tag3" --> ["tag1", "tag2", "tag3"]
+    - for each of those strings:
+      + ensure each one of these strings are unique
+      + look for a Tag object with that name. If there isn't one, create it
+      + Add the tag object to a list of tags for the article
+    - Set the article's tags to the list of tags that we have found and/or created
+
+  # the first stpe is something that Rugy does very easily using the String#split method. GO into your console
+
+  - console:
+
+    > "programming, Ruby, rails".split(",").collect{|s| s.strip.downcase}
+
+  - article.rb
+
+    def tag_list=(tags_string)
+      tag_names = tags_string.split(",").collect{|s| s.strip.downcase}.uniq
+      new_or_found-tags = tag_names.collect {|name| Tag.find_or_create_by(name: name)}
+      self.tags = new_or_found_tags
+    end
+
+Testing in the Console
+----------------------
+  - console:
+
+    > reload!
+    > article = Article.create title: "A Sample Article for Tagging!", body: "Great article goes here", tag_list: "ruby, technology"
+    > article.tags
+    # you should get back a slit of two tags. Try the other side of the Article-Tagging-Tag relationship
+    > tag = article.tags.first
+    > tag.articles
+    # you'll see that this tag is associated with just one article
+
+Adding Tags to our Display
+--------------------------
+  - According to our work in the console, articles can now have tags, but we haven't done anything to display them in the article pages.
+
+  - app/views/articles/show.html.erb          # below the line that displays the article.title add these lines
+
+    <p>
+      Tags:
+      <% @article.tags.each do |tag| %>
+        <%= link_to tag.nam, tag_path(tag) %>
+      <% end %>
+    </p>
+
+  # refresh your view and BOOM:
+
+    NoMethodError in Articles#show
+    Showing app/views/articles/index.html.erb where line #6 raised:
+    undefined method `tag_path' for #<ActionView::Base:0x104aaa460>
+
+  # the link_to helper is trying to use tag_path from the router, but the router doesn't know anything about our Tag object.
+  # we created a model, but we necer created a controller or route. There's nothing to link to - so let's generate that controller from your terminal:
+
+  - Terminal
+
+    $ bin/rails generate controller tags
+
+  - config/routes.rb      # add tags as a resource
+
+    Blogger::application.routes.draw do
+
+      root to: 'articles#index'
+      resources :articles do
+        resources :comments
+      end
+      resources :tags
+    end
+
+  # refresh your article page and you should see tags, with links, associated with this article
+
+Listing Articles by Tag
+-----------------------
+  - The links for our tags are showing up, but if you click on them you'll see our old friend "No action responded to show."
+
+  - app/controllers/tags_controller.rb    # define show action
+
+    def show
+      @tag = Tag.find(params[:id])
+    end
+
+  - app/views/tags/show.html.erb          # create the show template
+
+    <h1>Articles Tagged with <%= @tag.name %></h1>
+
+    <ul>
+      <% @tag.articles.each do |article| %>
+        <li><%= link_to article.title, article_path(article) %></li>
+      <% end %>
+    </ul>
+
+  # refresh your view nad you should see a list of articles with that tag.
+    keep in midn that there might be some abnormalities from articles we tagged before doing our fixes to the tag_list= method.
+    for any article with issues, try going to its edit screen, savign it, and things should be fixed up.
+    If you wanted to clear out all taggings you could do Tagging.destroy_all from your console
+
+**We’ve built the show action, but the reader should also be able to browse the tags available at http://localhost:3000/tags.
+  I think you can do this on your own. Create an index action in your tags_controller.rb and an index.html.erb in the corresponding views folder.
+  Look at your articles_controller.rb and Article index.html.erb if you need some clues.
+
+  Now that we can see all of our tags, we also want the capability to delete them.
+  I think you can do this one on your own too. Create a destroy action in your tags_controller.rb
+  and edit the index.html.erb file you just created. Look at your articles_controller.rb and
+  Article show.html.erb if you need some clues.
+
+  - tags_controller.rb
+
+
+  - index.html.erb

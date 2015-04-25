@@ -1,0 +1,273 @@
+===== I5: Authentication =====
+  # 3 popular gems for authentication: AuthLogic, Devise and Sorcery
+
+1. Installing Sorcery
+  -  Gemfile
+    gem 'sorcery'
+  - Terminal
+    $ bundle
+    $ rails generate
+
+2. Running the Generator
+  - Terminal
+    $ bin/rails generate sorcery:install --model=Author
+  - db/migrate/*_sorcery_core.rb
+
+    class SorceryCore < ActiveRecord::Migration
+      def change
+        create_table :authors do |t|
+          t.string  :username,              :null => false
+          t.string  :email,                 :null => false
+          t.string  :crypted_password,      :null => false
+          t.string  :salt,                  :null => false
+
+          t.timestamps
+        end
+        add_index :authors, :email, unique: true
+      end
+    end
+
+  - Terminal
+    $ bin/rake db:migrate
+
+  - app/models/author.rb
+
+    class Author < ActiveRecord::Base
+      authenticates_with_sorcery!
+    end
+
+3. Creating a First Account
+  # first, stop then restart your server to make sure it's picked up the newly generated code.
+
+** what is the rals code controller scaffold generator
+
+  - Terminal
+    $ bin/rails generate scaffold_controller Author username:string email:string password:password password_confirmation:password
+
+  # Rails has two scaffod generators: scaffold and scaffold_controller. The scaffod generator generates the model, controller and views.
+    The scaffold_controller will generate the controller and views. We are generating a scaffold_controller instead of scaffold because
+    Sorcery has already defined for us an Author model
+
+  # The generator did a good job generating most of our fields correctly, however, it did not kow that we want our password field and
+    password confirmation field to use a password text entry.
+
+  - authors/_form.html.erb
+
+    <div class="field">
+      <%= f.label :password %><br />
+      <%= f.password_field :password %>
+    </div>
+    <div class="field">
+      <%= f.label :password_confirmation %><br />
+      <%= f.password_field :password_confirmation %>
+    </div>
+
+  # To provide validation that the password field and the password confirmation field match, we need to define this relationship in the model
+
+    class Author < ActiveRecord::Base
+      authenticates_with_sorcery!
+      validates_confirmation_of :password, message: "should match confirmation", if: password
+    end
+
+  # The password and password_confirmation fields are sometimes referred to as "virtual attributes" because they are not actually being stored in the database.
+  # Instead, Sorcery uses the given password along with the autmatically generated salt value to create and store the crypted_password value
+
+  # The generator did not add a resource for our Authors. We need to update our routes.rb file
+
+  - routes.rb
+
+    Blogger::Application.routes.draw do
+      resources :authors
+    end
+
+  # after going to http://localhost:3000/authors/new; let's add in the email and password information
+  # the password and password_confirmation are displayed here. let's delete that
+  # clicking back, the app/views/authors/index.html.erb page also shows the hash and sale, let's remove those as well
+
+  - app/views/authors/show.html.erb
+
+      <body>
+        <p class="flash">
+          <%= flash.notice %>
+        </p>
+        <div id="container">
+          <div id="content">
+            <%= yield %>
+            <hr>
+            <h6>
+              <% if logged_in? %>
+                <%= "Logged in as #{current_user.email}" %>
+              <% else %>
+                Logged out
+              <% end %>
+            </h6>
+          </div>
+        </div>
+      </body>
+
+4. Logging in
+  # We need to build the actual endpoints for logging in and out, which means we need controller actions for them.
+    We'll create an AuthorSessions controller and add in the necessary actions: new, create, and destroy
+
+  - Terminal
+    $ bin/rails generate controller AuthorSessions
+
+  - app/controllers/author_sessions_controller.rb     # add the new, create and destroy methods
+
+    class AuthorSessionsController < Application Controller
+      def new
+      end
+
+      def create
+        if login(params[:email], params[:password])
+          redirect_back_or_to(articles_path, notice: 'Logged in successfully.')
+        else
+          flash.now.alert = "Login failed."
+          render action: :new
+        end
+      end
+
+      def destroy
+        logout
+        redirect_to(:authors, notice: 'Logged out!')
+      end
+    end
+
+  # as is common for Rails apps, the new action is responsible for rendering the related form,
+    the create action accepts the submission of that form, and the destroy action removes a record of the appropriate type
+    In this case, our records are the Author objects that represent a logged-in user
+
+  - app/views/author_sessions/new.html.erb      # creates the template for the new action that contains the login form
+
+    <h1>Login</h1>
+
+    <%= form_tag author_sessions_path, method: :post do %>
+      <div class="field">
+        <%= label_tag :email %>
+        <%= text_field_tag :email %>
+        <br/>
+      </div>
+      <div class="field">
+        <%= label_tag :password %>
+        <%= text_field_tag :password %>
+        <br/>
+      </div>
+      <div class="actions">
+        <%= submit_tag "Login" %>
+      </div>
+    <% end %>
+
+    <%= link_to 'Back', articles_path %>
+
+  # the create action handles the logic for logging in, based on the parameters passed form the rendered form: email and password.
+    If the login is successful, the user is redirected to the articles index, or if the user had been trying to access a restricted page,
+    back to that page. If that login fails, we'll re-render the login form. The destroy action calls the logout method provided by Sorcery and the redirects
+
+  # Next we need some routes so we can access those actions from our browser.
+
+  - config/routes.rb
+
+    resources :author_sessions, only: [ :new, :create, :destroy ]
+
+    get 'login' => 'author_sessions#new'
+    get 'logout' => 'author_sessions#destroy'
+
+  - Terminal
+    $ bin/rake routes
+
+  # Our author sessions are similar to other resources in our system. However, we only want to open a smaller set of actions.
+  # An author is able to be presented with login page (:new), login (:create) and logout (:destroy).
+  # It does not make sense for it to provide an index or edit and update session data
+
+  # The last two entries create aliases to our author sessions actions.
+  # Externally we want our authors to visit pages that make the most sense to them:
+    - http://localhost:3000/login
+    - http://localhost:3000/logout
+  # Internally, we also want to use path and url helpers that make the most sense:
+    - login_path, login_url
+    - logout_path, logout_url
+
+  - app/views/layouts/application.html.erb      # update to include some links
+
+        <body>
+          <div id="container">
+            <div id="content">
+              <%= yield %>
+              <hr>
+              <h6>
+                <% if logged_in? %>
+                  <%= "Logged in as #{current_user.email}" %>
+                  <%= link_to "(logout)", logout_path %>
+                <% else %>
+                  <%= link_to "(login)", login_path %>
+                <% end %>
+              </h6>
+            </div>
+          </div>
+        </body>
+
+  # Now we should be able to log in and out and see our status reflected in the footer.
+
+5. Securing New Users
+  # It looks like we can create a new user and log in as that user.
+  # For security we're going to use one layer - that is a user who is logged in has access to all commands and pages
+  # while a user who isn't logged in can only post comments and try to log in
+
+  # Let's add this protection in the new users form:
+    - if there are zero users in the system, let anyone access the form
+    - if there are more than zero users registered, only users already logged in can access this form
+  # that way when the app is first setup we can create an account, then new users can only be created by a logged in user.
+  # lets use a before filter that will run before the new and create actions
+
+  - authors_controller.rb
+
+    before_filter :zero_authors_or_authenticated, only: [:new, :create]
+
+    def zero_authors_or_authenticated
+      unless Author.count == 0 || current_user
+        redirect_to root_path
+        return false
+      end
+    end
+
+  # the first line declares that we want to run a before filter named zero_authors_or_authenticated when either the new or create are accesssed.
+  # then we define that filter, checking if there are either zero registered users OR if there is a user already logged in.
+  # If neither of those is true, we redirect tot he path (our articles list) and return false.
+  # If either one of them is true this filter won't do anything, allowing the requested user regisration form to be rendered.
+
+  # With that in place, try accessing authors/new when you're logged in and when you're logged out.
+  # If you want to test that it works when no users exist, try this at your console:
+
+    > Author.destroy_all
+
+  # Then try to reach the registration form and it should work
+
+6. Securing the Rest of the Application
+  # THe first thing we need to do is sprinkle before_filters on most of our controllers:
+
+  - authors_controllers.rb
+    + add a before filter to protect the actions besides new and create:
+    + before_filter :require_login, except: [:new, :create]
+
+  - author_sessions_controller.rb
+    + all the methods need to be accessible to allow login and logout
+
+  - tags_controller.rb
+    + we need to prevent unauthenticated users from deleting the tags, so we protect just destroy.
+    + since this is only a single action we can use :only like this:
+    + before_filter :require_login, only: [:destroy]
+
+  - comments_controller
+    + authentication should be required for new, create, edit, update, and destroy
+    + figure out how to write the before filter using either :only or :except
+
+  # now our app is pretty secure, but we should hide all those edit, destroy, and new article links from unauthenticated users.
+
+  - app/views/articles/show.html.erb    # find the section where we output the "Actions". Wrap that secion in an if clause like this:
+
+    <% if logged_in? %>
+    <% end %>
+
+  # look at the article listing in your browser when you're logged out and make sure those links disappear.
+  # then use the same technique to hide the "create a new article" link
+  # similarly, hide the 'delete' link for the tags index
